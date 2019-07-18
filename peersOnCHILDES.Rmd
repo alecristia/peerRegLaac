@@ -1,0 +1,103 @@
+---
+title: "peers on childes"
+author: "AC"
+date: "7/1/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Intro
+
+In this section, we just read in some info about transcripts in childes, and what participants they contain. 
+
+```{r readin}
+
+library(childesr)
+d_transcripts <- get_transcripts()
+alldat=get_speaker_statistics()
+merge(alldat,d_transcripts,all.x=T,by="transcript_id")->alldat
+length(d_transcripts$filename) #total number of transcripts
+```
+
+
+
+Next we add a column (type) the classifies each speaker role into adults and peers, and then aggregate the number of sentences for each. At this point, we just want to use these numbers to detect transcripts that contain some peer speech, so there is no reason why sentences rather than word tokens or types are taken. It's just a first approximation. 
+
+I do exclude on purpose experimenter, doctor, clinician, key child -- I want to get at transcripts that have a sizable family-and-friends contribution, and exclude those that are mostly with experimenters. Note that "nurse" means babysitter in the UK -- so since it's ambiguous I include it just in case.
+
+```{r create-minitab}
+alldat$type=NA
+alldat$type[alldat$speaker_role %in% c("Brother","Sister","Sibling","Child","Playmate","Boy","Girl","Cousin")] <-"peer"
+alldat$type[alldat$speaker_role %in% c("Mother","Adult","Babysitter","Aunt","Caretaker",
+                                      "Father","Family_Friend","Grandfather","Grandmother",
+                                      "Housekeeper","Nurse","Uncle","Teenager")] <-"adult"
+table(alldat$speaker_role)
+table(alldat$type)
+
+sums=aggregate(num_utterances ~type + filename + target_child_id.x, data= alldat,sum)
+
+summary(sums)
+mysums=data.frame(sums)
+summary(mysums)
+adults=subset(mysums,type=="adult")
+peers=subset(mysums,type=="peer")
+adults$nutt_ad=adults$num_utterances
+peers$nutt_peer=peers$num_utterances
+
+adpe=merge(adults[,c("filename","nutt_ad")],peers[,c("filename","nutt_peer","target_child_id.x")],all=T)
+adpe$tot=adpe$nutt_ad+adpe$nutt_peer
+summary(adpe)
+adpe$prop_peer=adpe$nutt_peer/adpe$tot
+hist(adpe$prop_peer, main="N of transcripts by proportion of speech by peers (as opposed to adults)")
+hist(adpe$tot, main="N of transcripts by total N of sentences")
+plot(adpe$tot~adpe$prop_peer,main="Are files with peers shorter?")
+write.table(adpe,"adultsNpeers.txt",row.names = F,sep="\t")
+
+```
+
+For now, a simple selection: only transcripts that have at least .01% of utterances by peers, and at least 300 utterances in total.
+
+```{r selection}
+
+adpe$filename[adpe$prop_peer>.0001 & adpe$tot >300 & !is.na(adpe$prop_peer) & !is.na(adpe$tot)]->files_to_include
+write.csv(files_to_include,"files_to_include.txt",row.names = F)
+
+length(adpe$filename) #number of transcripts in the analysis, that have some speech by adults and/or some speech by peers
+
+length(files_to_include) #number of transcripts that have at least .01% of peer speech & 300 utterances
+```
+
+Since we use peer presence to select transcripts, we should ideally revisit the same corpora and extract all other transcripts associated with a child who has been included because their data contains some peer speech.
+
+The following code IS NOT WORKING YET. (bug description: the loop adds too many files, ending up with 500k files!!)
+```{r expansion, eval=F}
+adpe$corpus=gsub("/.*","",adpe$filename)
+table(adpe$corpus)
+table(adpe$target_child_id.x)
+
+for(thisc in levels(factor(adpe$corpus))){
+  thisc_kids=as.factor(adpe$target_child_id.x[adpe$corpus==thisc & !is.na(adpe$corpus) & !is.na(adpe$target_child_id.x)])
+  if(length(thisc_kids)>1) for(kid in thisc_kids){
+    kid_trans=adpe$filename[adpe$target_child_id.x==kid & !(adpe$filename %in% files_to_include) &
+                              !(is.na(adpe$target_child_id.x) & !is.na(adpe$filename))]
+    #print(length(kid_trans))
+    files_to_include=c(files_to_include,kid_trans)
+  }
+}
+
+
+length(files_to_include) #number of transcripts that have at least .01% of peer speech & 300 utterances OR belong to the same child found as having peer speech in a different transcript
+write.csv(files_to_include,"files_to_include_extended.txt",row.names = F)
+
+```
+
+
+ADD CHILD DIRECTED AS A FILTER
+
+THEN PULL OUT NAMES OF CORPORA TO GIVE TO CAMILA
+CHECK WHERE AND WHEN
+
+CHECK IF THERE ARE TRANSLATIONS
